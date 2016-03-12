@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 extern crate imagefmt;
 use imagefmt::{ColFmt, ColType};
 use std::fs::File;
@@ -71,6 +72,7 @@ struct Color(u8, u8, u8);
 
 const WHITE: Color = Color(255, 255, 255);
 const RED: Color = Color(255, 0, 0);
+const GREEN: Color = Color(0, 255, 0);
 
 struct Image {
     data: Vec<u8>,
@@ -173,16 +175,117 @@ fn face_line(obj: &Obj, p1: &FacePoint, p2: &FacePoint, image: &mut Image, color
     line(x0 as usize, y0 as usize, x1 as usize, y1 as usize, image, color);
 }
 
-fn main() {
-    let obj = Obj::from_file("head.obj").unwrap();
+struct Vec2 {
+    x: usize,
+    y: usize,
+}
 
-    let mut image = Image::new(800, 800);
+fn triangle(t0: &Vec2, t1: &Vec2, t2: &Vec2, image: &mut Image, color: &Color) {
+    if t0.y > t1.y {
+        triangle(t1, t0, t2, image, color);
+    } else if t1.y > t2.y {
+        triangle(t0, t2, t1, image, color);
+    } else {
+        //line(t0.x, t0.y, t1.x, t1.y, image, &WHITE);
+        //line(t1.x, t1.y, t2.x, t2.y, image, &WHITE);
+        //line(t2.x, t2.y, t0.x, t0.y, image, &WHITE);
 
-    for face in obj.faces.iter() {
-        face_line(&obj, &face.0, &face.1, &mut image, &WHITE);
-        face_line(&obj, &face.1, &face.2, &mut image, &WHITE);
-        face_line(&obj, &face.2, &face.0, &mut image, &WHITE);
+        let total_height = t2.y - t0.y;
+        let segment_height = t1.y - t0.y;
+
+        let mut x1 = t0.x;
+        let mut x2 = t0.x;
+
+        let (dx1, x1neg, x1height, dx2, x2neg, x2height) = if t1.x < t2.x {
+            (diff(t0.x, t1.x), t1.x < t0.x, segment_height, diff(t0.x, t2.x), t2.x < t0.x, total_height)
+        } else {
+            (diff(t0.x, t2.x), t2.x < t0.x, total_height, diff(t0.x, t1.x), t1.x < t0.x, segment_height)
+        };
+
+        let mut x1diff = x1height;
+        let mut x2diff = x2height;
+
+        for y in t0.y..(t1.y + 1) {
+            for x in x1..(x2+1) {
+                image.set_pixel(x, y, color);
+            }
+
+            x1diff += dx1 * 2;
+            x2diff += dx2 * 2;
+
+            while x1diff > 2 * x1height {
+                if x1neg {
+                    x1 -= 1;
+                } else {
+                    x1 += 1;
+                }
+                x1diff -= 2 * x1height;
+            }
+            while x2diff > 2 * x2height {
+                if x2neg {
+                    x2 -= 1;
+                } else {
+                    x2 += 1;
+                }
+                x2diff -= 2 * x2height;
+            }
+        }
+
+        let segment_height = t2.y - t1.y;
+
+        let mut x1 = t2.x;
+        let mut x2 = t2.x;
+
+        let (dx1, x1neg, x1height, dx2, x2neg, x2height) = if t0.x < t1.x {
+            (diff(t0.x, t2.x), t0.x < t2.x, total_height, diff(t1.x, t2.x), t1.x < t2.x, segment_height)
+        } else {
+            (diff(t1.x, t2.x), t1.x < t2.x, segment_height, diff(t0.x, t2.x), t0.x < t2.x, total_height)
+        };
+
+        let mut x1diff = x1height;
+        let mut x2diff = x2height;
+
+        // t2.y down to t1.y
+        for y in (t1.y..(t2.y + 1)).rev() {
+            for x in x1..(x2+1) {
+                image.set_pixel(x, y, color);
+            }
+
+            x1diff += dx1 * 2;
+            x2diff += dx2 * 2;
+
+            while x1diff > 2 * x1height {
+                if x1neg {
+                    x1 -= 1;
+                } else {
+                    x1 += 1;
+                }
+                x1diff -= 2 * x1height;
+            }
+            while x2diff > 2 * x2height {
+                if x2neg {
+                    x2 -= 1;
+                } else {
+                    x2 += 1;
+                }
+                x2diff -= 2 * x2height;
+            }
+        }
     }
+}
+
+fn main() {
+    // let obj = Obj::from_file("head.obj").unwrap();
+
+    let mut image = Image::new(200, 200);
+
+    let t0: Vec<Vec2> = vec![Vec2 { x: 10, y: 70 },   Vec2 { x: 50, y: 16 },  Vec2 { x: 70, y: 80 }];
+    let t1: Vec<Vec2> = vec![Vec2 { x: 180, y: 50 },  Vec2 { x: 150, y: 1 },   Vec2 { x: 70, y: 180 }];
+    let t2: Vec<Vec2> = vec![Vec2 { x: 180, y: 150 }, Vec2 { x: 120, y: 160 }, Vec2 { x: 130, y: 180 }];
+
+    triangle(&t0[0], &t0[1], &t0[2], &mut image, &RED);
+    triangle(&t1[0], &t1[1], &t1[2], &mut image, &WHITE);
+    triangle(&t2[0], &t2[1], &t2[2], &mut image, &GREEN);
 
     image.write("out.tga").unwrap();
 }
