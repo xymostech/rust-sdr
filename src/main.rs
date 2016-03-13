@@ -163,6 +163,7 @@ const GREEN: Color = Color(0, 255, 0);
 
 struct Image {
     data: Vec<u8>,
+    zbuffer: Vec<isize>,
     width: usize,
     height: usize,
 }
@@ -175,6 +176,21 @@ impl Image {
             self.data[index] = color.0;
             self.data[index+1] = color.1;
             self.data[index+2] = color.2;
+        }
+    }
+
+    fn set_pixel_with_depth(&mut self, x: usize, y: usize, color: &Color, depth: isize) {
+        if x < self.width && y < self.height {
+            let zbufferindex = (self.height - y - 1) * self.width + x;
+            let index = zbufferindex * 3;
+
+            if self.zbuffer[zbufferindex] < depth {
+                self.zbuffer[zbufferindex] = depth;
+
+                self.data[index] = color.0;
+                self.data[index+1] = color.1;
+                self.data[index+2] = color.2;
+            }
         }
     }
 
@@ -191,9 +207,12 @@ impl Image {
     fn new(width: usize, height: usize) -> Image {
         let mut data = Vec::with_capacity(width * height * 3);
         data.resize(width * height * 3, 0);
+        let mut zbuffer = Vec::with_capacity(width * height);
+        zbuffer.resize(width * height, isize::min_value());
 
         Image {
             data: data,
+            zbuffer: zbuffer,
             width: width,
             height: height,
         }
@@ -278,24 +297,20 @@ fn bounding_box(points: &[&Vec2<isize>]) -> (Vec2<isize>, Vec2<isize>) {
     (Vec2::<isize> { x: xmin, y: ymin }, Vec2::<isize> { x: xmax, y: ymax })
 }
 
-fn inside_triangle(p: &Vec2<isize>, t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>) -> bool {
+fn barycentric(x: isize, y: isize, t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>) -> Vec3<f32> {
     let c = Vec3::cross(
-        Vec3::<isize> { x: t2.x - t0.x, y: t1.x - t0.x, z: t0.x - p.x },
-        Vec3::<isize> { x: t2.y - t0.y, y: t1.y - t0.y, z: t0.y - p.y }
+        Vec3 { x: (t2.x - t0.x) as f32, y: (t1.x - t0.x) as f32, z: (t0.x - x) as f32 },
+        Vec3 { x: (t2.y - t0.y) as f32, y: (t1.y - t0.y) as f32, z: (t0.y - y) as f32 }
     );
 
-    if c.z < 0 {
-        c.z - c.x - c.y <= 0 &&
-            c.y <= 0 &&
-            c.x <= 0
-    } else {
-        c.z - c.x - c.y >= 0 &&
-            c.y >= 0 &&
-            c.x >= 0
+    Vec3 {
+        x: 1.0 - (c.x + c.y) / c.z,
+        y: c.y / c.z,
+        z: c.x / c.z,
     }
 }
 
-fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, image: &mut Image, color: &Color) {
+fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f32>, image: &mut Image, color: &Color) {
     let (bbmin, bbmax) = bounding_box(&vec![t0, t1, t2]);
     let min = Vec2::<isize> { x: 0, y: 0 };
     let max = Vec2::<isize> { x: (image.width - 1) as isize, y: (image.height - 1) as isize };
@@ -303,8 +318,16 @@ fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, image: &mut Im
 
     for x in bbmin.x as usize..bbmax.x as usize {
         for y in bbmin.y as usize..bbmax.y as usize {
-            if inside_triangle(&Vec2::<isize> { x: x as isize, y: y as isize }, t0, t1, t2) {
-                image.set_pixel(x, y, color);
+            let params = barycentric(
+                x as isize, y as isize,
+                t0, t1, t2
+            );
+
+            let inside_triangle = params.x >= 0.0 && params.y >= 0.0 && params.z >= 0.0;
+
+            if inside_triangle {
+                let depth = depths.x * params.x + depths.y * params.y + depths.z * params.z;
+                image.set_pixel_with_depth(x, y, color, (depth * 400.0) as isize);
             }
         }
     }
@@ -318,11 +341,17 @@ fn main() {
     for face in obj.faces.iter() {
         let fp0 = obj.vert(face.0.vindex);
         let fp1 = obj.vert(face.1.vindex);
-        let fp2 = obj.vert(face.2.vindex);;
+        let fp2 = obj.vert(face.2.vindex);
 
         let t0 = Vec2::<isize> { x: ((fp0.x + 1.0) * 400.0) as isize, y: ((fp0.y + 1.0) * 400.0) as isize };
         let t1 = Vec2::<isize> { x: ((fp1.x + 1.0) * 400.0) as isize, y: ((fp1.y + 1.0) * 400.0) as isize };
         let t2 = Vec2::<isize> { x: ((fp2.x + 1.0) * 400.0) as isize, y: ((fp2.y + 1.0) * 400.0) as isize };
+
+        let depths = Vec3 {
+            x: fp0.z,
+            y: fp1.z,
+            z: fp2.z,
+        };
 
         let normal = face.normal(&obj);
 
@@ -330,7 +359,7 @@ fn main() {
         let component = (light * 255.0) as u8;
 
         if light > 0.0 {
-            triangle(&t0, &t1, &t2, &mut image, &Color(component, component, component));
+            triangle(&t0, &t1, &t2, depths, &mut image, &Color(component, component, component));
         }
     }
 
