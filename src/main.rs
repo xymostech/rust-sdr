@@ -5,6 +5,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::io::BufRead;
 use std::cmp;
+use std::ops::{Sub, Add, Mul};
 
 #[derive(Clone, Copy)]
 struct Vec2<T> {
@@ -12,7 +13,7 @@ struct Vec2<T> {
     y: T,
 }
 
-impl <T: Copy + Ord> Vec2<T> {
+impl<T: Copy + Ord> Vec2<T> {
     fn clamp(&self, min: &Vec2<T>, max: &Vec2<T>) -> Vec2<T> {
         Vec2::<T> {
             x: cmp::max(min.x, cmp::min(max.x, self.x)),
@@ -28,12 +29,47 @@ struct Vec3<T> {
     z: T,
 }
 
-impl <T: Copy + std::ops::Mul<T, Output = T> + std::ops::Sub<T, Output = T>> Vec3<T> {
-    fn cross(&self, other: &Vec3<T>) -> Vec3<T> {
+impl<T> Sub<Vec3<T>> for Vec3<T>
+        where T: Sub<T, Output = T> {
+    type Output = Vec3<T>;
+
+    fn sub(self, other: Vec3<T>) -> Vec3<T> {
+        Vec3 {
+            x: self.x - other.x,
+            y: self.y - other.y,
+            z: self.z - other.z,
+        }
+    }
+}
+
+impl<T: Copy + Mul<T, Output = T> + Sub<T, Output = T>> Vec3<T> {
+    fn cross(self, other: Vec3<T>) -> Vec3<T> {
         Vec3::<T> {
             x: self.y * other.z - self.z * other.y,
             y: self.z * other.x - self.x * other.z,
             z: self.x * other.y - self.y * other.x,
+        }
+    }
+}
+
+impl<T: Copy + Mul<T, Output = T> + Add<T, Output = T>> Vec3<T> {
+    fn dot(self, other: Vec3<T>) -> T {
+        self.x * other.x + self.y * other.y + self.z * other.z
+    }
+}
+
+impl Vec3<f32> {
+    fn length(self) -> f32 {
+        (self.x * self.x + self.y * self.y + self.z * self.z).sqrt()
+    }
+
+    fn norm(self) -> Vec3<f32> {
+        let length = self.length();
+
+        Vec3 {
+            x: self.x / length,
+            y: self.y / length,
+            z: self.z / length,
         }
     }
 }
@@ -62,9 +98,19 @@ fn parse_point(line: &String) -> Vec3<f32> {
     Vec3::<f32> { x: vec[0], y: vec[1], z: vec[2] }
 }
 
+impl Face {
+    fn normal(&self, obj: &Obj) -> Vec3<f32> {
+        let v0 = obj.vert(self.0.vindex);
+        let v1 = obj.vert(self.1.vindex);
+        let v2 = obj.vert(self.2.vindex);
+
+        (v2 - v0).cross(v1 - v0).norm()
+    }
+}
+
 impl Obj {
-    fn vert(&self, i: usize) -> &Vec3<f32> {
-        &self.verts[i - 1]
+    fn vert(&self, i: usize) -> Vec3<f32> {
+        self.verts[i - 1]
     }
 
     fn from_file(filename: &str) -> Result<Obj, std::io::Error> {
@@ -234,8 +280,8 @@ fn bounding_box(points: &[&Vec2<isize>]) -> (Vec2<isize>, Vec2<isize>) {
 
 fn inside_triangle(p: &Vec2<isize>, t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>) -> bool {
     let c = Vec3::cross(
-        &Vec3::<isize> { x: t2.x - t0.x, y: t1.x - t0.x, z: t0.x - p.x },
-        &Vec3::<isize> { x: t2.y - t0.y, y: t1.y - t0.y, z: t0.y - p.y }
+        Vec3::<isize> { x: t2.x - t0.x, y: t1.x - t0.x, z: t0.x - p.x },
+        Vec3::<isize> { x: t2.y - t0.y, y: t1.y - t0.y, z: t0.y - p.y }
     );
 
     if c.z < 0 {
@@ -269,9 +315,6 @@ fn main() {
 
     let mut image = Image::new(800, 800);
 
-    let colors = [&RED, &GREEN, &WHITE, &BLUE];
-    let mut color = 0;
-
     for face in obj.faces.iter() {
         let fp0 = obj.vert(face.0.vindex);
         let fp1 = obj.vert(face.1.vindex);
@@ -281,8 +324,14 @@ fn main() {
         let t1 = Vec2::<isize> { x: ((fp1.x + 1.0) * 400.0) as isize, y: ((fp1.y + 1.0) * 400.0) as isize };
         let t2 = Vec2::<isize> { x: ((fp2.x + 1.0) * 400.0) as isize, y: ((fp2.y + 1.0) * 400.0) as isize };
 
-        triangle(&t0, &t1, &t2, &mut image, &colors[color % 4]);
-        color += 1;
+        let normal = face.normal(&obj);
+
+        let light = normal.dot(Vec3 { x: 0.0, y: 0.0, z: -1.0 });
+        let component = (light * 255.0) as u8;
+
+        if light > 0.0 {
+            triangle(&t0, &t1, &t2, &mut image, &Color(component, component, component));
+        }
     }
 
     image.write("out.tga").unwrap();
