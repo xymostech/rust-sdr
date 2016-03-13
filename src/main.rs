@@ -4,6 +4,7 @@ use imagefmt::{ColFmt, ColType};
 use std::fs::File;
 use std::io::BufReader;
 use std::io::BufRead;
+use std::cmp;
 
 struct Point(f32, f32, f32);
 #[derive(Clone)]
@@ -27,6 +28,10 @@ fn parse_point(line: &String) -> Point {
 }
 
 impl Obj {
+    fn vert(&self, i: usize) -> &Point {
+        &self.verts[i - 1]
+    }
+
     fn from_file(filename: &str) -> Result<Obj, std::io::Error> {
         let f = try!(File::open(filename));
 
@@ -71,6 +76,7 @@ impl Obj {
 struct Color(u8, u8, u8);
 
 const WHITE: Color = Color(255, 255, 255);
+const BLUE: Color = Color(0, 0, 255);
 const RED: Color = Color(255, 0, 0);
 const GREEN: Color = Color(0, 255, 0);
 
@@ -176,116 +182,96 @@ fn face_line(obj: &Obj, p1: &FacePoint, p2: &FacePoint, image: &mut Image, color
 }
 
 struct Vec2 {
-    x: usize,
-    y: usize,
+    x: isize,
+    y: isize,
+}
+
+struct Vec3 {
+    x: isize,
+    y: isize,
+    z: isize,
+}
+
+fn bounding_box(points: &[&Vec2]) -> (Vec2, Vec2) {
+    let mut xmin = isize::max_value();
+    let mut ymin = isize::max_value();
+    let mut xmax = isize::min_value();
+    let mut ymax = isize::min_value();
+
+    for point in points {
+        xmin = cmp::min(xmin, point.x);
+        ymin = cmp::min(ymin, point.y);
+        xmax = cmp::max(xmax, point.x);
+        ymax = cmp::max(ymax, point.y);
+    }
+
+    (Vec2 { x: xmin, y: ymin }, Vec2 { x: xmax, y: ymax })
+}
+
+fn clamp(v: &Vec2, min: &Vec2, max: &Vec2) -> Vec2 {
+    Vec2 { x: cmp::max(min.x, cmp::min(max.x, v.x)), y: cmp::max(min.y, cmp::min(max.y, v.y)) }
+}
+
+fn cross(a: &Vec3, b: &Vec3) -> Vec3 {
+    Vec3 {
+        x: a.y * b.z - a.z * b.y,
+        y: a.z * b.x - a.x * b.z,
+        z: a.x * b.y - a.y * b.x,
+    }
+}
+
+fn inside_triangle(p: &Vec2, t0: &Vec2, t1: &Vec2, t2: &Vec2) -> bool {
+    let c = cross(
+        &Vec3 { x: t2.x - t0.x, y: t1.x - t0.x, z: t0.x - p.x },
+        &Vec3 { x: t2.y - t0.y, y: t1.y - t0.y, z: t0.y - p.y }
+    );
+
+    if c.z < 0 {
+        c.z - c.x - c.y <= 0 &&
+            c.y <= 0 &&
+            c.x <= 0
+    } else {
+        c.z - c.x - c.y >= 0 &&
+            c.y >= 0 &&
+            c.x >= 0
+    }
 }
 
 fn triangle(t0: &Vec2, t1: &Vec2, t2: &Vec2, image: &mut Image, color: &Color) {
-    if t0.y > t1.y {
-        triangle(t1, t0, t2, image, color);
-    } else if t1.y > t2.y {
-        triangle(t0, t2, t1, image, color);
-    } else {
-        //line(t0.x, t0.y, t1.x, t1.y, image, &WHITE);
-        //line(t1.x, t1.y, t2.x, t2.y, image, &WHITE);
-        //line(t2.x, t2.y, t0.x, t0.y, image, &WHITE);
+    let (bbmin, bbmax) = bounding_box(&vec![t0, t1, t2]);
+    let min = Vec2 { x: 0, y: 0 };
+    let max = Vec2 { x: (image.width - 1) as isize, y: (image.height - 1) as isize };
+    let (bbmin, bbmax) = (clamp(&bbmin, &min, &max), clamp(&bbmax, &min, &max));
 
-        let total_height = t2.y - t0.y;
-        let segment_height = t1.y - t0.y;
-
-        let mut x1 = t0.x;
-        let mut x2 = t0.x;
-
-        let (dx1, x1neg, x1height, dx2, x2neg, x2height) = if t1.x < t2.x {
-            (diff(t0.x, t1.x), t1.x < t0.x, segment_height, diff(t0.x, t2.x), t2.x < t0.x, total_height)
-        } else {
-            (diff(t0.x, t2.x), t2.x < t0.x, total_height, diff(t0.x, t1.x), t1.x < t0.x, segment_height)
-        };
-
-        let mut x1diff = x1height;
-        let mut x2diff = x2height;
-
-        for y in t0.y..(t1.y + 1) {
-            for x in x1..(x2+1) {
+    for x in bbmin.x as usize..bbmax.x as usize {
+        for y in bbmin.y as usize..bbmax.y as usize {
+            if inside_triangle(&Vec2 { x: x as isize, y: y as isize }, t0, t1, t2) {
                 image.set_pixel(x, y, color);
-            }
-
-            x1diff += dx1 * 2;
-            x2diff += dx2 * 2;
-
-            while x1diff > 2 * x1height {
-                if x1neg {
-                    x1 -= 1;
-                } else {
-                    x1 += 1;
-                }
-                x1diff -= 2 * x1height;
-            }
-            while x2diff > 2 * x2height {
-                if x2neg {
-                    x2 -= 1;
-                } else {
-                    x2 += 1;
-                }
-                x2diff -= 2 * x2height;
-            }
-        }
-
-        let segment_height = t2.y - t1.y;
-
-        let mut x1 = t2.x;
-        let mut x2 = t2.x;
-
-        let (dx1, x1neg, x1height, dx2, x2neg, x2height) = if t0.x < t1.x {
-            (diff(t0.x, t2.x), t0.x < t2.x, total_height, diff(t1.x, t2.x), t1.x < t2.x, segment_height)
-        } else {
-            (diff(t1.x, t2.x), t1.x < t2.x, segment_height, diff(t0.x, t2.x), t0.x < t2.x, total_height)
-        };
-
-        let mut x1diff = x1height;
-        let mut x2diff = x2height;
-
-        // t2.y down to t1.y
-        for y in (t1.y..(t2.y + 1)).rev() {
-            for x in x1..(x2+1) {
-                image.set_pixel(x, y, color);
-            }
-
-            x1diff += dx1 * 2;
-            x2diff += dx2 * 2;
-
-            while x1diff > 2 * x1height {
-                if x1neg {
-                    x1 -= 1;
-                } else {
-                    x1 += 1;
-                }
-                x1diff -= 2 * x1height;
-            }
-            while x2diff > 2 * x2height {
-                if x2neg {
-                    x2 -= 1;
-                } else {
-                    x2 += 1;
-                }
-                x2diff -= 2 * x2height;
             }
         }
     }
 }
 
 fn main() {
-    // let obj = Obj::from_file("head.obj").unwrap();
+    let obj = Obj::from_file("head.obj").unwrap();
 
-    let mut image = Image::new(200, 200);
+    let mut image = Image::new(800, 800);
 
-    let t0: Vec<Vec2> = vec![Vec2 { x: 10, y: 70 },   Vec2 { x: 50, y: 16 },  Vec2 { x: 70, y: 80 }];
-    let t1: Vec<Vec2> = vec![Vec2 { x: 180, y: 50 },  Vec2 { x: 150, y: 1 },   Vec2 { x: 70, y: 180 }];
-    let t2: Vec<Vec2> = vec![Vec2 { x: 180, y: 150 }, Vec2 { x: 120, y: 160 }, Vec2 { x: 130, y: 180 }];
+    let colors = [&RED, &GREEN, &WHITE, &BLUE];
+    let mut color = 0;
 
-    triangle(&t0[0], &t0[1], &t0[2], &mut image, &RED);
-    triangle(&t1[0], &t1[1], &t1[2], &mut image, &WHITE);
-    triangle(&t2[0], &t2[1], &t2[2], &mut image, &GREEN);
+    for face in obj.faces.iter() {
+        let fp0 = obj.vert((face.0).0);
+        let fp1 = obj.vert((face.1).0);
+        let fp2 = obj.vert((face.2).0);
+
+        let t0 = Vec2 { x: ((fp0.0 + 1.0) * 400.0) as isize, y: ((fp0.1 + 1.0) * 400.0) as isize };
+        let t1 = Vec2 { x: ((fp1.0 + 1.0) * 400.0) as isize, y: ((fp1.1 + 1.0) * 400.0) as isize };
+        let t2 = Vec2 { x: ((fp2.0 + 1.0) * 400.0) as isize, y: ((fp2.1 + 1.0) * 400.0) as isize };
+
+        triangle(&t0, &t1, &t2, &mut image, &colors[color % 4]);
+        color += 1;
+    }
 
     image.write("out.tga").unwrap();
 }
