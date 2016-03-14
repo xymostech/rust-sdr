@@ -168,12 +168,23 @@ impl Obj {
     }
 }
 
+#[derive(Clone, Copy)]
 struct Color(u8, u8, u8);
 
 const WHITE: Color = Color(255, 255, 255);
 const BLUE: Color = Color(0, 0, 255);
 const RED: Color = Color(255, 0, 0);
 const GREEN: Color = Color(0, 255, 0);
+
+impl Color {
+    fn multiply(self, other: &Color) -> Color {
+        Color(
+            (self.0 as usize * other.0 as usize / 255) as u8,
+            (self.1 as usize * other.2 as usize / 255) as u8,
+            (self.1 as usize * other.2 as usize / 255) as u8
+        )
+    }
+}
 
 struct Image {
     data: Vec<u8>,
@@ -344,7 +355,7 @@ fn tex_color(p: Vec2<f32>, texture: &Image) -> Color {
     texture.get_pixel((p.x * texture.width as f32) as usize, (p.y * texture.height as f32) as usize)
 }
 
-fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f32>, tex0: Vec2<f32>, tex1: Vec2<f32>, tex2: Vec2<f32>, image: &mut Image, tex: &Image) {
+fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f32>, tex0: Vec2<f32>, tex1: Vec2<f32>, tex2: Vec2<f32>, image: &mut Image, tex: &Image, light_color: &Color) {
     let (bbmin, bbmax) = bounding_box(&vec![t0, t1, t2]);
     let min = Vec2::<isize> { x: 0, y: 0 };
     let max = Vec2::<isize> { x: (image.width - 1) as isize, y: (image.height - 1) as isize };
@@ -367,7 +378,7 @@ fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f
                     y: tex0.y * params.x + tex1.y * params.y + tex2.y * params.z,
                 };
                 let color = tex_color(tex_coords, tex);
-                image.set_pixel_with_depth(x, y, &color, (depth * 400.0) as isize);
+                image.set_pixel_with_depth(x, y, &color.multiply(light_color), (depth * 400.0) as isize);
             }
         }
     }
@@ -404,7 +415,7 @@ fn main() {
         let component = (light * 255.0) as u8;
 
         if light > 0.0 {
-            triangle(&t0, &t1, &t2, depths, tex0, tex1, tex2, &mut image, &tex);
+            triangle(&t0, &t1, &t2, depths, tex0, tex1, tex2, &mut image, &tex, &Color(component, component, component));
         }
     }
 
