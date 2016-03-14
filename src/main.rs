@@ -29,6 +29,16 @@ struct Vec3<T> {
     z: T,
 }
 
+impl<T: Copy> Vec3<T> {
+    // Swizzle
+    fn xy(&self) -> Vec2<T> {
+        Vec2 {
+            x: self.x,
+            y: self.y,
+        }
+    }
+}
+
 impl<T> Sub<Vec3<T>> for Vec3<T>
         where T: Sub<T, Output = T> {
     type Output = Vec3<T>;
@@ -113,6 +123,10 @@ impl Obj {
         self.verts[i - 1]
     }
 
+    fn tex_vert(&self, i: usize) -> Vec2<f32> {
+        self.tex_verts[i - 1].xy()
+    }
+
     fn from_file(filename: &str) -> Result<Obj, std::io::Error> {
         let f = try!(File::open(filename));
 
@@ -127,11 +141,11 @@ impl Obj {
         for line in file.lines() {
             let line = try!(line);
 
-            if line.starts_with("v") {
+            if line.starts_with("v ") {
                 obj.verts.push(parse_point(&line));
-            } else if line.starts_with("vt") {
+            } else if line.starts_with("vt ") {
                 obj.tex_verts.push(parse_point(&line));
-            } else if line.starts_with("vn") {
+            } else if line.starts_with("vn ") {
                 obj.norm_verts.push(parse_point(&line));
             } else if line.starts_with("f") {
                 let mut iter = line.split_whitespace();
@@ -194,6 +208,11 @@ impl Image {
         }
     }
 
+    fn get_pixel(&self, x: usize, y: usize) -> Color {
+        let index = ((self.height - y - 1) * self.width + x) * 3;
+        Color(self.data[index], self.data[index + 1], self.data[index + 2])
+    }
+
     fn write(&self, filename: &str) -> imagefmt::Result<()> {
         imagefmt::write(
             filename,
@@ -215,6 +234,17 @@ impl Image {
             zbuffer: zbuffer,
             width: width,
             height: height,
+        }
+    }
+
+    fn from(filename: &str) -> Image {
+        let img = imagefmt::read(filename, ColFmt::RGB).unwrap();
+
+        Image {
+            data: img.buf,
+            zbuffer: Vec::new(),
+            width: img.w,
+            height: img.h,
         }
     }
 }
@@ -310,7 +340,11 @@ fn barycentric(x: isize, y: isize, t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2
     }
 }
 
-fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f32>, image: &mut Image, color: &Color) {
+fn tex_color(p: Vec2<f32>, texture: &Image) -> Color {
+    texture.get_pixel((p.x * texture.width as f32) as usize, (p.y * texture.height as f32) as usize)
+}
+
+fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f32>, tex0: Vec2<f32>, tex1: Vec2<f32>, tex2: Vec2<f32>, image: &mut Image, tex: &Image) {
     let (bbmin, bbmax) = bounding_box(&vec![t0, t1, t2]);
     let min = Vec2::<isize> { x: 0, y: 0 };
     let max = Vec2::<isize> { x: (image.width - 1) as isize, y: (image.height - 1) as isize };
@@ -327,7 +361,13 @@ fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f
 
             if inside_triangle {
                 let depth = depths.x * params.x + depths.y * params.y + depths.z * params.z;
-                image.set_pixel_with_depth(x, y, color, (depth * 400.0) as isize);
+
+                let tex_coords = Vec2 {
+                    x: tex0.x * params.x + tex1.x * params.y + tex2.x * params.z,
+                    y: tex0.y * params.x + tex1.y * params.y + tex2.y * params.z,
+                };
+                let color = tex_color(tex_coords, tex);
+                image.set_pixel_with_depth(x, y, &color, (depth * 400.0) as isize);
             }
         }
     }
@@ -335,6 +375,7 @@ fn triangle(t0: &Vec2<isize>, t1: &Vec2<isize>, t2: &Vec2<isize>, depths: Vec3<f
 
 fn main() {
     let obj = Obj::from_file("head.obj").unwrap();
+    let tex = Image::from("head_tex.tga");
 
     let mut image = Image::new(800, 800);
 
@@ -346,6 +387,10 @@ fn main() {
         let t0 = Vec2::<isize> { x: ((fp0.x + 1.0) * 400.0) as isize, y: ((fp0.y + 1.0) * 400.0) as isize };
         let t1 = Vec2::<isize> { x: ((fp1.x + 1.0) * 400.0) as isize, y: ((fp1.y + 1.0) * 400.0) as isize };
         let t2 = Vec2::<isize> { x: ((fp2.x + 1.0) * 400.0) as isize, y: ((fp2.y + 1.0) * 400.0) as isize };
+
+        let tex0 = obj.tex_vert(face.0.tindex);
+        let tex1 = obj.tex_vert(face.1.tindex);
+        let tex2 = obj.tex_vert(face.2.tindex);
 
         let depths = Vec3 {
             x: fp0.z,
@@ -359,7 +404,7 @@ fn main() {
         let component = (light * 255.0) as u8;
 
         if light > 0.0 {
-            triangle(&t0, &t1, &t2, depths, &mut image, &Color(component, component, component));
+            triangle(&t0, &t1, &t2, depths, tex0, tex1, tex2, &mut image, &tex);
         }
     }
 
