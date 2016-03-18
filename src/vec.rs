@@ -1,5 +1,5 @@
 use std::cmp;
-use std::ops::{Sub, Add, Mul};
+use std::ops::{Sub, Add, Mul, Div};
 
 #[derive(Clone, Copy)]
 pub struct Vec2<T> {
@@ -12,6 +12,18 @@ impl<T: Copy + Ord> Vec2<T> {
         Vec2::<T> {
             x: cmp::max(min.x, cmp::min(max.x, self.x)),
             y: cmp::max(min.y, cmp::min(max.y, self.y)),
+        }
+    }
+}
+
+impl<T> Div<T> for Vec2<T>
+        where T: Div<T, Output = T> + Copy {
+    type Output = Vec2<T>;
+
+    fn div(self, rhs: T) -> Vec2<T> {
+        Vec2 {
+            x: self.x / rhs,
+            y: self.y / rhs,
         }
     }
 }
@@ -33,6 +45,19 @@ impl<T: Copy> Vec3<T> {
     }
 }
 
+impl<T> Add<Vec3<T>> for Vec3<T>
+        where T: Add<T, Output = T> {
+    type Output = Vec3<T>;
+
+    fn add(self, other: Vec3<T>) -> Vec3<T> {
+        Vec3 {
+            x: self.x + other.x,
+            y: self.y + other.y,
+            z: self.z + other.z,
+        }
+    }
+}
+
 impl<T> Sub<Vec3<T>> for Vec3<T>
         where T: Sub<T, Output = T> {
     type Output = Vec3<T>;
@@ -42,6 +67,19 @@ impl<T> Sub<Vec3<T>> for Vec3<T>
             x: self.x - other.x,
             y: self.y - other.y,
             z: self.z - other.z,
+        }
+    }
+}
+
+impl<T> Mul<T> for Vec3<T>
+        where T: Mul<T, Output = T> + Copy {
+    type Output = Vec3<T>;
+
+    fn mul(self, rhs: T) -> Vec3<T> {
+        Vec3 {
+            x: self.x * rhs,
+            y: self.y * rhs,
+            z: self.z * rhs,
         }
     }
 }
@@ -74,6 +112,23 @@ impl Vec3<f32> {
             x: self.x / length,
             y: self.y / length,
             z: self.z / length,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct Vec4<T> {
+    pub x: T,
+    pub y: T,
+    pub z: T,
+    pub w: T,
+}
+
+impl<T: Copy> Vec4<T> {
+    pub fn xy(&self) -> Vec2<T> {
+        Vec2 {
+            x: self.x,
+            y: self.y,
         }
     }
 }
