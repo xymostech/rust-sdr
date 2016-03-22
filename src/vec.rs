@@ -16,6 +16,30 @@ impl<T: Copy + Ord> Vec2<T> {
     }
 }
 
+impl<T> Add<Vec2<T>> for Vec2<T>
+        where T: Add<T, Output = T> + Copy {
+    type Output = Vec2<T>;
+
+    fn add(self, rhs: Vec2<T>) -> Vec2<T> {
+        Vec2 {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+        }
+    }
+}
+
+impl<T> Mul<T> for Vec2<T>
+        where T: Mul<T, Output = T> + Copy {
+    type Output = Vec2<T>;
+
+    fn mul(self, rhs: T) -> Vec2<T> {
+        Vec2 {
+            x: self.x * rhs,
+            y: self.y * rhs,
+        }
+    }
+}
+
 impl<T> Div<T> for Vec2<T>
         where T: Div<T, Output = T> + Copy {
     type Output = Vec2<T>;

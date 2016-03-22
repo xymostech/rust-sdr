@@ -2,9 +2,21 @@ use vec::{Vec2, Vec3, Vec4};
 use image::{Image, Color};
 use std::cmp;
 
-pub trait Shader {
-    fn vertex(&self, Vec3<f32>) -> (Vec4<f32>, Vec3<f32>);
-    fn fragment(&self, Vec2<isize>, Vec3<f32>) -> Option<Color>;
+pub trait Vary {
+    fn vary(&Self, &Self, &Self, Vec3<f32>) -> Self;
+}
+
+pub struct NoVary;
+
+impl Vary for NoVary {
+    fn vary(_: &NoVary, _: &NoVary, _: &NoVary, _: Vec3<f32>) -> NoVary {
+        NoVary
+    }
+}
+
+pub trait Shader<V: Vary> {
+    fn vertex(&self, Vec3<f32>, &V) -> (Vec4<f32>, V);
+    fn fragment(&self, Vec2<isize>, V) -> Option<Color>;
 }
 
 fn barycentric(point: Vec2<isize>, verts: &Vec<Vec2<isize>>) -> Vec3<f32> {
@@ -35,20 +47,20 @@ fn bounding_box<T: cmp::Ord + Copy>(pts: &Vec<Vec2<T>>) -> (Vec2<T>, Vec2<T>) {
     (min, max)
 }
 
-pub fn draw_triangle<S: Shader>(verts: &Vec<Vec3<f32>>, shader: &S, image: &mut Image) {
-    let vertex_outs: Vec<(Vec4<f32>, Vec3<f32>)> = verts.iter().map(|v| shader.vertex(*v)).collect();
+pub fn draw_triangle<V: Vary, S: Shader<V>>(verts: &Vec<(Vec3<f32>, V)>, shader: &S, image: &mut Image) {
+    let vertex_outs: Vec<(Vec4<f32>, V)> = verts.iter().map(|&(pt, ref vary)| shader.vertex(pt, vary)).collect();
     let depths: Vec<f32> = vertex_outs.iter().map(|&(v, _)| v.z).collect();
     let xy_verts: Vec<Vec2<isize>> =
         vertex_outs.iter()
         .map(|&(v, _)| v.xy() / v.w)
         .map(|v| Vec2 { x: v.x as isize, y: v.y as isize })
         .collect();
-    let colors: Vec<Vec3<f32>> = vertex_outs.iter().map(|&(_, c)| c).collect();
+    let varies: Vec<&V> = vertex_outs.iter().map(|&(_, ref v)| v).collect();
 
     let (min_bb, max_bb) = bounding_box(&xy_verts);
 
-    for x in cmp::max(0, min_bb.x)..cmp::min((image.width - 1) as isize, max_bb.x) {
-        for y in cmp::max(0, min_bb.y)..cmp::min((image.height - 1) as isize, max_bb.y) {
+    for x in cmp::max(0, min_bb.x)..cmp::min(image.width as isize, max_bb.x) {
+        for y in cmp::max(0, min_bb.y)..cmp::min(image.height as isize, max_bb.y) {
             let pt = Vec2 { x: x, y: y };
 
             let bary = barycentric(pt, &xy_verts);
@@ -57,8 +69,8 @@ pub fn draw_triangle<S: Shader>(verts: &Vec<Vec3<f32>>, shader: &S, image: &mut 
                 continue;
             }
 
-            let in_color = colors[0] * bary.x + colors[1] * bary.y + colors[2] * bary.z;
-            let maybe_out_color = shader.fragment(pt, in_color);
+            let varied = V::vary(varies[0], varies[1], varies[2], bary);
+            let maybe_out_color = shader.fragment(pt, varied);
 
             match maybe_out_color {
                 Some(out_color) => {

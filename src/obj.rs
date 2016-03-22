@@ -47,6 +47,10 @@ impl Obj {
         self.tex_verts[i - 1].xy()
     }
 
+    pub fn norm_vert(&self, i: usize) -> Vec3<f32> {
+        self.norm_verts[i - 1]
+    }
+
     pub fn from_file(filename: &str) -> Result<Obj, std::io::Error> {
         let f = try!(File::open(filename));
 

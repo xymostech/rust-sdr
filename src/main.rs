@@ -1,157 +1,112 @@
 #![allow(dead_code)]
 extern crate imagefmt;
+extern crate num;
+extern crate rand;
 
 mod vec;
 mod image;
 mod obj;
 mod shader;
+mod matrix;
 
 use vec::{Vec2, Vec3, Vec4};
 use image::*;
-use shader::{Shader, draw_triangle};
+use shader::{Vary, Shader, draw_triangle};
+use matrix::*;
+use obj::*;
 
-struct MyShader<'a> {
-    frag: &'a Fn(isize, isize) -> Color,
+//use std::f32;
+
+#[derive(Clone, Copy)]
+struct Vars {
+    normal: Vec3<f32>,
+    tex: Vec2<f32>,
 }
 
-impl<'a> Shader for MyShader<'a> {
-    fn vertex(&self, pt: Vec3<f32>) -> (Vec4<f32>, Vec3<f32>) {
+impl Vary for Vars {
+    fn vary(v1: &Vars, v2: &Vars, v3: &Vars, bary: Vec3<f32>) -> Vars {
+        Vars {
+            normal: (v1.normal * bary.x + v2.normal * bary.y + v3.normal * bary.z).norm(),
+            tex: v1.tex * bary.x + v2.tex * bary.y + v3.tex * bary.z,
+        }
+    }
+}
+
+struct MyShader<'a> {
+    mat: &'a Matrix4x4<f32>,
+    tex: &'a Image,
+    light_dir: Vec3<f32>,
+}
+
+impl<'a> Shader<Vars> for MyShader<'a> {
+    fn vertex(&self, pt: Vec3<f32>, vars: &Vars) -> (Vec4<f32>, Vars) {
+        let pt4 = Vec4 { x: pt.x, y: pt.y, z: pt.z, w: 1.0 };
+
         (
-            Vec4 {
-                x: pt.x,
-                y: pt.y,
-                z: 0.0,
-                w: 1.0,
-            },
-            Vec3 {
-                x: 255.0,
-                y: 0.0,
-                z: 0.0,
-            }
+            self.mat * &pt4,
+            *vars
         )
     }
 
-    fn fragment(&self, pt: Vec2<isize>, _: Vec3<f32>) -> Option<Color> {
-        Some((self.frag)(pt.x, pt.y))
-    }
-}
+    fn fragment(&self, _: Vec2<isize>, vars: Vars) -> Option<Color> {
+        let comp = vars.normal.dot(self.light_dir) * 255.0;
 
-fn make_square(x: f32, y: f32) -> (Vec<Vec3<f32>>, Vec<Vec3<f32>>) {
-    (
-        vec![
-            Vec3 { x: x, y: y, z: 0.0 },
-            Vec3 { x: x + 256.0, y: y, z: 0.0 },
-            Vec3 { x: x + 256.0, y: y + 256.0, z: 0.0 },
-        ],
-        vec![
-            Vec3 { x: x, y: y, z: 0.0 },
-            Vec3 { x: x, y: y + 256.0, z: 0.0 },
-            Vec3 { x: x + 256.0, y: y + 256.0, z: 0.0 },
-        ],
-    )
+        if comp > 0.0 {
+            let tex_x = (self.tex.width as f32 * vars.tex.x) as usize;
+            let tex_y = (self.tex.height as f32 * vars.tex.y) as usize;
+            let tex = self.tex.get_pixel(tex_x, tex_y);
+            let shading = Color(comp as u8, comp as u8, comp as u8);
+
+            Some(tex.multiply(&shading))
+        } else {
+            None
+        }
+    }
 }
 
 fn main() {
-    let mut image = Image::new(256 * 4, 256 * 3);
+    let mut image = Image::new(800, 800);
 
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color(x as u8, y as u8, 0),
+    let viewport = Matrix4x4::viewport(0.0, 0.0, 800.0, 800.0, 255.0);
+    let view = Matrix4x4::scale(Vec3 { x: 0.8, y: 0.8, z: 0.8 });
+
+    let lookat = Matrix4x4::lookat(
+        Vec3 { x: 1.0, y: 1.0, z: 3.0 },
+        Vec3 { x: 0.0, y: 0.0, z: 0.0 },
+        Vec3 { x: 0.0, y: 1.0, z: 0.0 },
+    );
+    let perspective = Matrix4x4::perspective(3.0);
+
+    let obj = Obj::from_file("head.obj").unwrap();
+    let tex = Image::from("head_tex.tga");
+
+    let mat = viewport * perspective * lookat * view;
+    let shader = MyShader {
+        mat: &mat,
+        light_dir: Vec3 { x: 0.0, y: 0.0, z: 1.0 },
+        tex: &tex,
+    };
+
+    for face in obj.faces.iter() {
+        let fp0 = obj.vert(face.0.vindex);
+        let fp1 = obj.vert(face.1.vindex);
+        let fp2 = obj.vert(face.2.vindex);
+
+        let vars0 = Vars {
+            normal: obj.norm_vert(face.0.nindex),
+            tex: obj.tex_vert(face.0.tindex),
+        };
+        let vars1 = Vars {
+            normal: obj.norm_vert(face.1.nindex),
+            tex: obj.tex_vert(face.1.tindex),
+        };
+        let vars2 = Vars {
+            normal: obj.norm_vert(face.2.nindex),
+            tex: obj.tex_vert(face.2.tindex),
         };
 
-        let (tri1, tri2) = make_square(256.0, 256.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
-    }
-
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color(255, y as u8, x as u8),
-        };
-
-        let (tri1, tri2) = make_square(512.0, 256.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
-    }
-
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color(0, y as u8, (255 - x) as u8),
-        };
-
-        let (tri1, tri2) = make_square(0.0, 256.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
-    }
-
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color(x as u8, 255, y as u8),
-        };
-
-        let (tri1, tri2) = make_square(256.0, 512.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
-    }
-
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color(x as u8, 0, (255 - y) as u8),
-        };
-
-        let (tri1, tri2) = make_square(256.0, 0.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
-    }
-
-    {
-        let shader = MyShader {
-            frag: &|x, y| Color((255 - x) as u8, y as u8, 255),
-        };
-
-        let (tri1, tri2) = make_square(768.0, 256.0);
-
-        draw_triangle(&tri1, &shader, &mut image);
-        draw_triangle(&tri2, &shader, &mut image);
+        draw_triangle(&vec![(fp0, vars0), (fp1, vars1), (fp2, vars2)], &shader, &mut image);
     }
 
     image.write("out.tga").unwrap();
-
-    // let obj = Obj::from_file("head.obj").unwrap();
-    // let tex = Image::from("head_tex.tga");
-
-    // for face in obj.faces.iter() {
-    //     let fp0 = obj.vert(face.0.vindex);
-    //     let fp1 = obj.vert(face.1.vindex);
-    //     let fp2 = obj.vert(face.2.vindex);
-
-    //     let t0 = Vec2::<isize> { x: ((fp0.x + 1.0) * 400.0) as isize, y: ((fp0.y + 1.0) * 400.0) as isize };
-    //     let t1 = Vec2::<isize> { x: ((fp1.x + 1.0) * 400.0) as isize, y: ((fp1.y + 1.0) * 400.0) as isize };
-    //     let t2 = Vec2::<isize> { x: ((fp2.x + 1.0) * 400.0) as isize, y: ((fp2.y + 1.0) * 400.0) as isize };
-
-    //     let tex0 = obj.tex_vert(face.0.tindex);
-    //     let tex1 = obj.tex_vert(face.1.tindex);
-    //     let tex2 = obj.tex_vert(face.2.tindex);
-
-    //     let depths = Vec3 {
-    //         x: fp0.z,
-    //         y: fp1.z,
-    //         z: fp2.z,
-    //     };
-
-    //     let normal = face.normal(&obj);
-
-    //     let light = normal.dot(Vec3 { x: 0.0, y: 0.0, z: -1.0 });
-    //     let component = (light * 255.0) as u8;
-
-    //     if light > 0.0 {
-    //         triangle(&t0, &t1, &t2, depths, tex0, tex1, tex2, &mut image, &tex, &Color(component, component, component));
-    //     }
-    // }
-
 }

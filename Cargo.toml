@@ -5,3 +5,5 @@ authors = ["Emily Eisenberg <xymostech@gmail.com>"]
 
 [dependencies]
 imagefmt = "3.0.1"
+num = "0.1.31"
+rand = "0.3.14"

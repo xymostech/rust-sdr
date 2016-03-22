@@ -13,8 +13,8 @@ impl Color {
     pub fn multiply(self, other: &Color) -> Color {
         Color(
             (self.0 as usize * other.0 as usize / 255) as u8,
-            (self.1 as usize * other.2 as usize / 255) as u8,
-            (self.1 as usize * other.2 as usize / 255) as u8
+            (self.1 as usize * other.1 as usize / 255) as u8,
+            (self.2 as usize * other.2 as usize / 255) as u8,
         )
     }
 }
